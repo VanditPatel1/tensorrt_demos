@@ -1,11 +1,9 @@
 """trt_ssd_async.py
 
-This is the 'async' version of trt_ssd.py implementation.  It creates
-1 dedicated child thread for fetching camera input and do inferencing
-with the TensorRT optimized SSD model/engine, while using the main
-thread for drawing detection results and displaying video.  Ideally,
-the 2 threads work in a pipeline fashion so overall throughput (FPS)
-would be improved comparing to the non-async version.
+Thread to read camera input
+Thread to drawing detection results / displaying video
+
+TODO Make both cameras work through this
 """
 
 
@@ -23,8 +21,9 @@ from utils.display import open_window, set_display, show_fps
 from utils.visualization import BBoxVisualization
 
 
-WINDOW_NAME = 'TrtSsdDemoAsync'
+WINDOW_NAME = 'Async Detection Test'
 MAIN_THREAD_TIMEOUT = 20.0  # 20 seconds
+
 INPUT_HW = (300, 300)
 SUPPORTED_MODELS = [
     'ssd_mobilenet_v1_coco',
@@ -51,19 +50,15 @@ def parse_args():
     parser.add_argument('-m', '--model', type=str,
                         default='ssd_mobilenet_v1_coco',
                         choices=SUPPORTED_MODELS)
+    parser.add_argument('-d', '--detect', actopn='append',
+                        help='-d sports ball -d fork')
     args = parser.parse_args()
     return args
 
 
 class TrtThread(threading.Thread):
-    """TrtThread
-
-    This implements the child thread which continues to read images
-    from cam (input) and to do TRT engine inferencing.  The child
-    thread stores the input image and detection results into global
-    variables and uses a condition varaiable to inform main thread.
-    In other words, the TrtThread acts as the producer while the
-    main thread is the consumer.
+    """
+    Thread to read image from cam and do infrencing
     """
     def __init__(self, condition, cam, model, conf_th):
         """__init__
@@ -141,14 +136,17 @@ def loop_and_display(condition, vis):
                 img, boxes, confs, clss = s_img, s_boxes, s_confs, s_clss
             else:
                 raise SystemExit('ERROR: timeout waiting for img from child')
+
         img = vis.draw_bboxes(img, boxes, confs, clss)
         img = show_fps(img, fps)
         cv2.imshow(WINDOW_NAME, img)
+
         toc = time.time()
         curr_fps = 1.0 / (toc - tic)
         # calculate an exponentially decaying average of fps number
         fps = curr_fps if fps == 0.0 else (fps*0.95 + curr_fps*0.05)
         tic = toc
+
         key = cv2.waitKey(1)
         if key == 27:  # ESC key: quit program
             break
@@ -159,6 +157,8 @@ def loop_and_display(condition, vis):
 
 def main():
     args = parse_args()
+    arg.onboard = True
+
     cam = Camera(args)
     if not cam.isOpened():
         raise SystemExit('ERROR: failed to open camera!')
@@ -168,7 +168,7 @@ def main():
     cls_dict = get_cls_dict(args.model.split('_')[-1])
 
     open_window(
-        WINDOW_NAME, 'Camera TensorRT SSD Demo',
+        WINDOW_NAME, WINDOW_NAME,
         cam.img_width, cam.img_height)
     vis = BBoxVisualization(cls_dict)
     condition = threading.Condition()

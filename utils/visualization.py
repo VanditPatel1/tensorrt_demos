@@ -87,16 +87,20 @@ class BBoxVisualization():
     def __init__(self, cls_dict):
         self.cls_dict = cls_dict
         self.colors = gen_colors(len(cls_dict))
+        self.all_classes = set(v for k,v in self.cls_dict.items())
 
-    def draw_bboxes(self, img, boxes, confs, clss):
+    def draw_bboxes(self, img, boxes, confs, clss, filtered_cls=self.all_classes):
         """Draw detected bounding boxes on the original image."""
         for bb, cf, cl in zip(boxes, confs, clss):
             cl = int(cl)
-            x_min, y_min, x_max, y_max = bb[0], bb[1], bb[2], bb[3]
-            color = self.colors[cl]
-            cv2.rectangle(img, (x_min, y_min), (x_max, y_max), color, 2)
-            txt_loc = (max(x_min+2, 0), max(y_min+2, 0))
-            cls_name = self.cls_dict.get(cl, 'CLS{}'.format(cl))
-            txt = '{} {:.2f}'.format(cls_name, cf)
-            img = draw_boxed_text(img, txt, txt_loc, color)
+
+            if self.cls_dict[cl] in filtered_cls:
+                x_min, y_min, x_max, y_max = bb[0], bb[1], bb[2], bb[3]
+                color = self.colors[cl]
+                cv2.rectangle(img, (x_min, y_min), (x_max, y_max), color, 2)
+                txt_loc = (max(x_min+2, 0), max(y_min+2, 0))
+                cls_name = self.cls_dict.get(cl, 'CLS{}'.format(cl))
+                txt = '{} {:.2f}'.format(cls_name, cf)
+                img = draw_boxed_text(img, txt, txt_loc, color)
+
         return img
