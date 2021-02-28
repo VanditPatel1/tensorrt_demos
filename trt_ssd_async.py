@@ -3,7 +3,7 @@
 Thread to read camera input
 Thread to drawing detection results / displaying video
 
-TODO Make both cameras work through this
+TODO Start working on dual camera input
 """
 
 
@@ -11,6 +11,7 @@ import time
 import argparse
 import threading
 
+import collections
 import cv2
 import pycuda.driver as cuda
 
@@ -39,6 +40,10 @@ SUPPORTED_MODELS = [
 # into these variables, while the main thread reads from them.
 s_img, s_boxes, s_confs, s_clss = None, None, None, None
 
+SharedVariables = collections.namedtuple("img", "boxes", "confs", "clss")
+
+id_0 = SharedVariables()
+id_1 = SharedVariables()
 
 def parse_args():
     """Parse input arguments."""
@@ -46,7 +51,7 @@ def parse_args():
             'real-time object detection with TensorRT optimized '
             'SSD model on Jetson Nano')
     parser = argparse.ArgumentParser(description=desc)
-    parser = add_camera_args(parser)
+    parser = add_camera_args(parser) #TODO remove useless ones from here
     parser.add_argument('-m', '--model', type=str,
                         default='ssd_mobilenet_v1_coco',
                         choices=SUPPORTED_MODELS)
@@ -160,7 +165,7 @@ def main():
     args.onboard = True
     args.do_resize = True
 
-    cam = Camera(args)
+    cam = Camera(args, sensor_id=0)
     if not cam.isOpened():
         raise SystemExit('ERROR: failed to open camera!')
 

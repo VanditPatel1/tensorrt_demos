@@ -1,12 +1,3 @@
-"""camera.py
-
-This code implements the Camera class, which encapsulates code to
-handle IP CAM, USB webcam or the Jetson onboard camera.  In
-addition, this Camera class is further extended to take a video
-file or an image file as input.
-"""
-
-
 import logging
 import threading
 import subprocess
@@ -15,28 +6,12 @@ import numpy as np
 import cv2
 
 
-# The following flag ise used to control whether to use a GStreamer
-# pipeline to open USB webcam source.  If set to False, we just open
-# the webcam using cv2.VideoCapture(index) machinery. i.e. relying
-# on cv2's built-in function to capture images from the webcam.
-USB_GSTREAMER = True
-
-
 def add_camera_args(parser):
     """Add parser augument for camera options."""
-    parser.add_argument('--image', type=str, default=None,
-                        help='image file name, e.g. dog.jpg')
     parser.add_argument('--video', type=str, default=None,
                         help='video file name, e.g. traffic.mp4')
     parser.add_argument('--video_looping', action='store_true',
                         help='loop around the video file [False]')
-    parser.add_argument('--rtsp', type=str, default=None,
-                        help=('RTSP H.264 stream, e.g. '
-                              'rtsp://admin:123456@192.168.1.64:554'))
-    parser.add_argument('--rtsp_latency', type=int, default=200,
-                        help='RTSP latency in ms [200]')
-    parser.add_argument('--usb', type=int, default=None,
-                        help='USB webcam device id (/dev/video?) [None]')
     parser.add_argument('--onboard', type=int, default=None,
                         help='Jetson onboard camera [None]')
     parser.add_argument('--copy_frame', action='store_true',
@@ -50,48 +25,21 @@ def add_camera_args(parser):
     return parser
 
 
-def open_cam_rtsp(uri, width, height, latency):
-    """Open an RTSP URI (IP CAM)."""
-    gst_elements = str(subprocess.check_output('gst-inspect-1.0'))
-    if 'omxh264dec' in gst_elements:
-        # Use hardware H.264 decoder on Jetson platforms
-        gst_str = ('rtspsrc location={} latency={} ! '
-                   'rtph264depay ! h264parse ! omxh264dec ! '
-                   'nvvidconv ! '
-                   'video/x-raw, width=(int){}, height=(int){}, '
-                   'format=(string)BGRx ! videoconvert ! '
-                   'appsink').format(uri, latency, width, height)
-    elif 'avdec_h264' in gst_elements:
-        # Otherwise try to use the software decoder 'avdec_h264'
-        # NOTE: in case resizing images is necessary, try adding
-        #       a 'videoscale' into the pipeline
-        gst_str = ('rtspsrc location={} latency={} ! '
-                   'rtph264depay ! h264parse ! avdec_h264 ! '
-                   'videoconvert ! appsink').format(uri, latency)
-    else:
-        raise RuntimeError('H.264 decoder not found!')
-    return cv2.VideoCapture(gst_str, cv2.CAP_GSTREAMER)
-
-
-def open_cam_onboard(width, height):
+def open_cam_onboard(width, height, sensor_id):
     """Open the Jetson onboard camera."""
-    gst_str = ('nvarguscamerasrc ! '
+    gst_str = ('nvarguscamerasrc sensor_id={} ! '
                 'video/x-raw(memory:NVMM), '
                 'width=(int)1920, height=(int)1080, '
                 'format=(string)NV12, framerate=(fraction)30/1 ! '
                 'nvvidconv flip-method=2 ! '
                 'video/x-raw, width=(int){}, height=(int){}, '
                 'format=(string)BGRx ! '
-                'videoconvert ! appsink').format(width, height)
+                'videoconvert ! appsink').format(sensor_id, width, height)
 
     return cv2.VideoCapture(gst_str, cv2.CAP_GSTREAMER)
 
 
 def grab_img(cam):
-    """This 'grab_img' function is designed to be run in the sub-thread.
-    Once started, this thread continues to grab a new image and put it
-    into the global 'img_handle', until 'thread_running' is set to False.
-    """
     while cam.thread_running:
         _, cam.img_handle = cam.cap.read()
         if cam.img_handle is None:
@@ -101,18 +49,8 @@ def grab_img(cam):
 
 
 class Camera():
-    """Camera class which supports reading images from theses video sources:
 
-    1. Image (jpg, png, etc.) file, repeating indefinitely
-    2. Video file
-    3. RTSP (IP CAM)
-    4. USB webcam
-    5. Jetson onboard camera
-    """
-
-    def __init__(self, args):
-        #TODO What is default val of width and height??
-        #TODO Check out resizing 
+    def __init__(self, args, sensor_id=0):
         self.args = args
         self.is_opened = False
         self.video_file = ''
@@ -123,6 +61,7 @@ class Camera():
         self.do_resize = args.do_resize
         self.img_width = args.width
         self.img_height = args.height
+        self.sensor_id = sensor_id
         self.cap = None
         self.thread = None
         self._open()  # try to open the camera
@@ -140,7 +79,7 @@ class Camera():
             self._start()
         elif a.onboard is not None:
             logging.info('Camera: using Jetson onboard camera')
-            self.cap = open_cam_onboard(a.width, a.height)
+            self.cap = open_cam_onboard(a.width, a.height, self.sensor_id)
             self._start()
         else:
             raise RuntimeError('no camera type specified!')
