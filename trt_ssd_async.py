@@ -157,7 +157,8 @@ def loop_and_display(condition, vis):
 
 def main():
     args = parse_args()
-    arg.onboard = True
+    args.onboard = True
+    args.do_resize = True
 
     cam = Camera(args)
     if not cam.isOpened():
