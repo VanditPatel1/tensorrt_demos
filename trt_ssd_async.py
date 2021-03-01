@@ -40,6 +40,8 @@ SUPPORTED_MODELS = [
 # into these variables, while the main thread reads from them.
 s_img, s_boxes, s_confs, s_clss = None, None, None, None
 
+
+# Share global tuple between threads
 SharedVariables = collections.namedtuple("img", "boxes", "confs", "clss")
 
 id_0 = SharedVariables()
@@ -65,7 +67,7 @@ class TrtThread(threading.Thread):
     """
     Thread to read image from cam and do infrencing
     """
-    def __init__(self, condition, cam, model, conf_th):
+    def __init__(self, condition, cam, model, shared_vars, conf_th, GPU=0):
         """__init__
 
         # Arguments
@@ -80,6 +82,8 @@ class TrtThread(threading.Thread):
         self.cam = cam
         self.model = model
         self.conf_th = conf_th
+        self.GPU = GPU
+        self.shared = shared_vars
         self.cuda_ctx = None  # to be created when run
         self.trt_ssd = None   # to be created when run
         self.running = False
@@ -91,10 +95,10 @@ class TrtThread(threading.Thread):
         which calls CUDA kernels.  In other words, creating CUDA
         context in __init__() doesn't work.
         """
-        global s_img, s_boxes, s_confs, s_clss
+        # global s_img, s_boxes, s_confs, s_clss
 
         print('TrtThread: loading the TRT SSD engine...')
-        self.cuda_ctx = cuda.Device(0).make_context()  # GPU 0
+        self.cuda_ctx = cuda.Device(self.GPU).make_context()  # GPU 0
         self.trt_ssd = TrtSSD(self.model, INPUT_HW)
         print('TrtThread: start running...')
         self.running = True
@@ -104,7 +108,9 @@ class TrtThread(threading.Thread):
                 break
             boxes, confs, clss = self.trt_ssd.detect(img, self.conf_th)
             with self.condition:
-                s_img, s_boxes, s_confs, s_clss = img, boxes, confs, clss
+                # s_img, s_boxes, s_confs, s_clss = img, boxes, confs, clss
+                self.shared.img, = img
+                self.shared.boxes, self.shared.confs, self.shared.clss, = boxes, confs, clss
                 self.condition.notify()
         del self.trt_ssd
         self.cuda_ctx.pop()
@@ -116,7 +122,7 @@ class TrtThread(threading.Thread):
         self.join()
 
 
-def loop_and_display(condition, vis):
+def loop_and_display(condition, vis, shared):
     """Take detection results from the child thread and display.
 
     # Arguments
@@ -138,7 +144,7 @@ def loop_and_display(condition, vis):
             # references to the frame and detection result for
             # display.
             if condition.wait(timeout=MAIN_THREAD_TIMEOUT):
-                img, boxes, confs, clss = s_img, s_boxes, s_confs, s_clss
+                img, boxes, confs, clss = shared.img, shared.boxes, shared.confs, shared.clss
             else:
                 raise SystemExit('ERROR: timeout waiting for img from child')
 
@@ -178,9 +184,9 @@ def main():
         cam.img_width, cam.img_height)
     vis = BBoxVisualization(cls_dict)
     condition = threading.Condition()
-    trt_thread = TrtThread(condition, cam, args.model, conf_th=0.3)
+    trt_thread = TrtThread(condition, cam, args.model, id_0, conf_th=0.3, GPU=0)
     trt_thread.start()  # start the child thread
-    loop_and_display(condition, vis)
+    loop_and_display(condition, vis, id_0)
     trt_thread.stop()   # stop the child thread
 
     cam.release()
