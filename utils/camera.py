@@ -36,6 +36,8 @@ def open_cam_onboard(width, height, sensor_id):
                 'format=(string)BGRx ! '
                 'videoconvert ! appsink').format(sensor_id, width, height)
 
+    print(gst_str)
+
     return cv2.VideoCapture(gst_str, cv2.CAP_GSTREAMER)
 
 

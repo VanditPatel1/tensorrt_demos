@@ -89,8 +89,12 @@ class BBoxVisualization():
         self.colors = gen_colors(len(cls_dict))
         self.all_classes = set(v for k,v in self.cls_dict.items())
 
-    def draw_bboxes(self, img, boxes, confs, clss, filtered_cls=self.all_classes):
+    def draw_bboxes(self, img, boxes, confs, clss, filtered_cls=None):
         """Draw detected bounding boxes on the original image."""
+	
+        if not filtered_cls:
+                filtered_cls = self.all_classes
+
         for bb, cf, cl in zip(boxes, confs, clss):
             cl = int(cl)
 

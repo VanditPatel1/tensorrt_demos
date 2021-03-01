@@ -22,6 +22,10 @@ from utils.display import open_window, set_display, show_fps
 from utils.visualization import BBoxVisualization
 
 
+# COMMAND TO END CAMERA PROCESS
+# sudo systemctl restart nvargus-daemon
+
+
 WINDOW_NAME = 'Async Detection Test'
 MAIN_THREAD_TIMEOUT = 20.0  # 20 seconds
 
@@ -42,7 +46,17 @@ s_img, s_boxes, s_confs, s_clss = None, None, None, None
 
 
 # Share global tuple between threads
-SharedVariables = collections.namedtuple("img", "boxes", "confs", "clss")
+# SharedVariables = collections.namedtuple("SharedVariables", ["img", "boxes", "confs", "clss"])
+
+class SharedVariables:
+    
+    img = None
+    boxes = None
+    confs = None
+    clss = None
+    
+    def __init__(self):
+        pass
 
 id_0 = SharedVariables()
 id_1 = SharedVariables()
@@ -57,7 +71,7 @@ def parse_args():
     parser.add_argument('-m', '--model', type=str,
                         default='ssd_mobilenet_v1_coco',
                         choices=SUPPORTED_MODELS)
-    parser.add_argument('-d', '--detect', actopn='append',
+    parser.add_argument('-d', '--detect', action='append',
                         help='-d sports ball -d fork')
     args = parser.parse_args()
     return args
@@ -109,8 +123,8 @@ class TrtThread(threading.Thread):
             boxes, confs, clss = self.trt_ssd.detect(img, self.conf_th)
             with self.condition:
                 # s_img, s_boxes, s_confs, s_clss = img, boxes, confs, clss
-                self.shared.img, = img
-                self.shared.boxes, self.shared.confs, self.shared.clss, = boxes, confs, clss
+                self.shared.img = img
+                self.shared.boxes, self.shared.confs, self.shared.clss = boxes, confs, clss
                 self.condition.notify()
         del self.trt_ssd
         self.cuda_ctx.pop()
@@ -122,7 +136,7 @@ class TrtThread(threading.Thread):
         self.join()
 
 
-def loop_and_display(condition, vis, shared):
+def loop_and_display(condition, vis, shared, filtered_cls, name):
     """Take detection results from the child thread and display.
 
     # Arguments
@@ -136,7 +150,7 @@ def loop_and_display(condition, vis, shared):
     fps = 0.0
     tic = time.time()
     while True:
-        if cv2.getWindowProperty(WINDOW_NAME, 0) < 0:
+        if cv2.getWindowProperty(name, 0) < 0:
             break
         with condition:
             # Wait for the next frame and detection result.  When
@@ -148,7 +162,7 @@ def loop_and_display(condition, vis, shared):
             else:
                 raise SystemExit('ERROR: timeout waiting for img from child')
 
-        img = vis.draw_bboxes(img, boxes, confs, clss)
+        img = vis.draw_bboxes(img, boxes, confs, clss, filtered_cls)
         img = show_fps(img, fps)
         cv2.imshow(WINDOW_NAME, img)
 
@@ -166,17 +180,40 @@ def loop_and_display(condition, vis, shared):
             set_display(WINDOW_NAME, full_scrn)
 
 
+def start_cam(args, sensor_id, cls_dict, name):
+    
+    cam = Camera(args, sensor_id=0)
+    if not cam.isOpened():
+        raise SystemExit('ERROR: failed to open camera!')
+        
+    open_window(
+    name, name,
+        cam.img_width, cam.img_height)
+    vis = BBoxVisualization(cls_dict)
+
+    condition = threading.Condition()
+    trt_thread = TrtThread(condition, cam, args.model, id_0, conf_th=0.1, GPU=0)
+    trt_thread.start()  # start the child thread
+    loop_and_display(condition, vis, id_0, args.detect, name)
+    trt_thread.stop()   # stop the child thread
+    
+    cam.release()
+    
+
+
 def main():
     args = parse_args()
     args.onboard = True
     args.do_resize = True
 
+    cuda.init()  # init pycuda driver
+    cls_dict = get_cls_dict(args.model.split('_')[-1])
+    com = """
+
     cam = Camera(args, sensor_id=0)
     if not cam.isOpened():
         raise SystemExit('ERROR: failed to open camera!')
-
-    cuda.init()  # init pycuda driver
-
+    
     cls_dict = get_cls_dict(args.model.split('_')[-1])
 
     open_window(
@@ -184,12 +221,22 @@ def main():
         cam.img_width, cam.img_height)
     vis = BBoxVisualization(cls_dict)
     condition = threading.Condition()
-    trt_thread = TrtThread(condition, cam, args.model, id_0, conf_th=0.3, GPU=0)
+    trt_thread = TrtThread(condition, cam, args.model, id_0, conf_th=0.1, GPU=0)
     trt_thread.start()  # start the child thread
-    loop_and_display(condition, vis, id_0)
+    loop_and_display(condition, vis, id_0, args.detect)
     trt_thread.stop()   # stop the child thread
-
-    cam.release()
+    """
+    w_1 = WINDOW_NAME + "ZERO"
+    w_2 = WINDOW_NAME + "ONE"
+    t1 = threading.Thread(target=start_cam, args=[args, 0, cls_dict, w_1])
+    t2 = threading.Thread(target=start_cam, args=[args, 1, cls_dict, w_2])
+    
+    # cam.release()
+    t1.start()
+    t2.start()
+    t1.join()
+    t2.join()
+    
     cv2.destroyAllWindows()
 
 
