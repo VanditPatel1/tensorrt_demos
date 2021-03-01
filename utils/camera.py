@@ -29,7 +29,7 @@ def open_cam_onboard(width, height, sensor_id):
     """Open the Jetson onboard camera."""
     gst_str = ('nvarguscamerasrc sensor_id={} ! '
                 'video/x-raw(memory:NVMM), '
-                'width=(int)1920, height=(int)1080, '
+                'width=(int)640, height=(int)480, '
                 'format=(string)NV12, framerate=(fraction)30/1 ! '
                 'nvvidconv flip-method=2 ! '
                 'video/x-raw, width=(int){}, height=(int){}, '

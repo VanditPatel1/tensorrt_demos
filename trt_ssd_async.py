@@ -164,7 +164,7 @@ def loop_and_display(condition, vis, shared, filtered_cls, name):
 
         img = vis.draw_bboxes(img, boxes, confs, clss, filtered_cls)
         img = show_fps(img, fps)
-        cv2.imshow(WINDOW_NAME, img)
+        cv2.imshow(name, img)
 
         toc = time.time()
         curr_fps = 1.0 / (toc - tic)
@@ -180,9 +180,9 @@ def loop_and_display(condition, vis, shared, filtered_cls, name):
             set_display(WINDOW_NAME, full_scrn)
 
 
-def start_cam(args, sensor_id, cls_dict, name):
+def start_cam(args, sensor_id, shared, cls_dict, name):
     
-    cam = Camera(args, sensor_id=0)
+    cam = Camera(args, sensor_id=sensor_id)
     if not cam.isOpened():
         raise SystemExit('ERROR: failed to open camera!')
         
@@ -192,9 +192,9 @@ def start_cam(args, sensor_id, cls_dict, name):
     vis = BBoxVisualization(cls_dict)
 
     condition = threading.Condition()
-    trt_thread = TrtThread(condition, cam, args.model, id_0, conf_th=0.1, GPU=0)
+    trt_thread = TrtThread(condition, cam, args.model, shared, conf_th=0.1, GPU=0)
     trt_thread.start()  # start the child thread
-    loop_and_display(condition, vis, id_0, args.detect, name)
+    loop_and_display(condition, vis, shared, args.detect, name)
     trt_thread.stop()   # stop the child thread
     
     cam.release()
@@ -205,6 +205,7 @@ def main():
     args = parse_args()
     args.onboard = True
     args.do_resize = True
+    both_cam=True
 
     cuda.init()  # init pycuda driver
     cls_dict = get_cls_dict(args.model.split('_')[-1])
@@ -228,15 +229,17 @@ def main():
     """
     w_1 = WINDOW_NAME + "ZERO"
     w_2 = WINDOW_NAME + "ONE"
-    t1 = threading.Thread(target=start_cam, args=[args, 0, cls_dict, w_1])
-    t2 = threading.Thread(target=start_cam, args=[args, 1, cls_dict, w_2])
-    
-    # cam.release()
+    t1 = threading.Thread(target=start_cam, args=[args, 0, id_0, cls_dict, w_1])
     t1.start()
-    t2.start()
-    t1.join()
-    t2.join()
     
+    
+    if both_cam:
+        t2 = threading.Thread(target=start_cam, args=[args, 1, id_1, cls_dict, w_2])
+        t2.start()
+        t2.join()
+    
+    t1.join()
+
     cv2.destroyAllWindows()
 
 
