@@ -29,7 +29,7 @@ def _postprocess_trt(img, output, conf_th, output_layout=7):
     for prefix in range(0, len(output), output_layout):
         #index = int(output[prefix+0])
         conf = float(output[prefix+2])
-        if conf < conf_th:
+        if conf < conf_th and int(output[prefix+1]) != 37:
             continue
         x1 = int(output[prefix+3] * img_w)
         y1 = int(output[prefix+4] * img_h)

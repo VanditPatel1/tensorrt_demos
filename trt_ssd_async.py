@@ -20,6 +20,7 @@ from utils.ssd import TrtSSD
 from utils.camera import add_camera_args, Camera
 from utils.display import open_window, set_display, show_fps
 from utils.visualization import BBoxVisualization
+from track import ObjectTracker
 
 
 # COMMAND TO END CAMERA PROCESS
@@ -38,11 +39,6 @@ SUPPORTED_MODELS = [
     'ssd_inception_v2_coco',
     'ssdlite_mobilenet_v2_coco',
 ]
-
-# These global variables are 'shared' between the main and child
-# threads.  The child thread writes new frame and detection result
-# into these variables, while the main thread reads from them.
-s_img, s_boxes, s_confs, s_clss = None, None, None, None
 
 
 # Share global tuple between threads
@@ -98,6 +94,7 @@ class TrtThread(threading.Thread):
         self.conf_th = conf_th
         self.GPU = GPU
         self.shared = shared_vars
+        self.tracker = ObjectTracker()
         self.cuda_ctx = None  # to be created when run
         self.trt_ssd = None   # to be created when run
         self.running = False
@@ -109,23 +106,40 @@ class TrtThread(threading.Thread):
         which calls CUDA kernels.  In other words, creating CUDA
         context in __init__() doesn't work.
         """
-        # global s_img, s_boxes, s_confs, s_clss
 
         print('TrtThread: loading the TRT SSD engine...')
         self.cuda_ctx = cuda.Device(self.GPU).make_context()  # GPU 0
         self.trt_ssd = TrtSSD(self.model, INPUT_HW)
         print('TrtThread: start running...')
         self.running = True
+        
         while self.running:
             img = self.cam.read()
             if img is None:
                 break
-            boxes, confs, clss = self.trt_ssd.detect(img, self.conf_th)
-            with self.condition:
-                # s_img, s_boxes, s_confs, s_clss = img, boxes, confs, clss
+            
+            with self.condition:  
+                if self.shared.boxes:
+                    tic = time.time()
+                    _, success, b = self.tracker.track(self.shared.boxes[0], img)
+                    print("Took {} sec to track?".format(time.time()-tic))
+                    b = [int(a) for a in b]
+                    boxes = [b]
+                    confs, clss = [1], [37]
+                    if not success:
+                        self.shared.boxes = None
+                    else:
+                        self.shared.boxes = boxes
+
+                if not self.shared.boxes:
+                    boxes, confs, clss = self.trt_ssd.detect(img, self.conf_th)
+                    if boxes:
+                        self.tracker.start_tracker(boxes[0], img)
+      
                 self.shared.img = img
                 self.shared.boxes, self.shared.confs, self.shared.clss = boxes, confs, clss
                 self.condition.notify()
+        
         del self.trt_ssd
         self.cuda_ctx.pop()
         del self.cuda_ctx
@@ -144,8 +158,6 @@ def loop_and_display(condition, vis, shared, filtered_cls, name):
                    the child thread.
         vis: for visualization.
     """
-    global s_img, s_boxes, s_confs, s_clss
-
     full_scrn = False
     fps = 0.0
     tic = time.time()
@@ -162,7 +174,9 @@ def loop_and_display(condition, vis, shared, filtered_cls, name):
             else:
                 raise SystemExit('ERROR: timeout waiting for img from child')
 
+        print("starting draw")
         img = vis.draw_bboxes(img, boxes, confs, clss, filtered_cls)
+        print("Ending draw")
         img = show_fps(img, fps)
         cv2.imshow(name, img)
 
@@ -205,7 +219,7 @@ def main():
     args = parse_args()
     args.onboard = True
     args.do_resize = True
-    both_cam=True
+    both_cam=False
 
     cuda.init()  # init pycuda driver
     cls_dict = get_cls_dict(args.model.split('_')[-1])
